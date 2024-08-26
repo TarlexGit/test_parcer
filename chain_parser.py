@@ -183,57 +183,6 @@ def setup_database(conn):
 
     conn.commit()
     cursor.close()
-    
-def create_sequences(conn):
-    """
-    Создает последовательности в базе данных. Обращение к БД с использованием контекстного менеджера. 
-    * коннект будет закрыт под капотом
-
-    Args:
-        conn (psycopg2.connect): Подключение к базе данных.
-    """
-    with conn.cursor() as cursor:
-        # Создаем последовательность для таблицы MESSAGE
-        cursor.execute("""
-        CREATE SEQUENCE message_int_id_seq
-        START WITH 0
-        INCREMENT BY 1
-        MINVALUE 0
-        NO MAXVALUE
-        CACHE 1;
-        """)
-
-        # Создаем функцию для установки значения int_id в таблице MESSAGE
-        cursor.execute("""
-        CREATE OR REPLACE FUNCTION set_message_int_id()
-        RETURNS TRIGGER AS $$
-        BEGIN
-            NEW.int_id := nextval('message_int_id_seq')::text;
-            RETURN NEW;
-        END;
-        $$ LANGUAGE plpgsql;
-        """)
-
-        # Создаем триггер для таблицы MESSAGE
-        cursor.execute("""
-        CREATE TRIGGER before_insert_message
-            BEFORE INSERT ON message
-            FOR EACH ROW
-            EXECUTE FUNCTION set_message_int_id();
-        """)
-
-        # Создаем последовательность для таблицы LOG
-        cursor.execute("""
-        CREATE SEQUENCE log_int_id_seq
-        START 1
-        INCREMENT BY 1;
-        """)
-
-        # Устанавливаем значение int_id по умолчанию в таблице LOG
-        cursor.execute("""
-        ALTER TABLE log ALTER COLUMN int_id SET DEFAULT nextval('log_int_id_seq');
-        """)
-
 
 
 def connect_to_db():
@@ -251,7 +200,6 @@ def parse_logs():
     """Основной процесс парсинга логов."""
     conn = connect_to_db()
     setup_database(conn)
-    # create_sequences(conn)
 
     general_log_handler = GeneralLogHandler(conn)
     message_handler = MessageLogHandler(conn, successor=general_log_handler)
