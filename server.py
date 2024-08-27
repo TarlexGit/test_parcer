@@ -3,7 +3,7 @@ import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
-from chain_parser import connect_to_db, find_emails
+from parse.chain_parser import connect_to_db, find_emails
 from my_html import PAGE
 
 
@@ -22,9 +22,6 @@ class AsyncHTTPRequestHandler(BaseHTTPRequestHandler):
 
             html_content = PAGE
             self.wfile.write(html_content.encode("utf-8"))
-
-            # Печать текста в консоль
-            print("GET request for HTML page received")
         else:
             self.send_response(200)
             self.send_header("Content-type", "text/html")
@@ -33,57 +30,78 @@ class AsyncHTTPRequestHandler(BaseHTTPRequestHandler):
             response = "Hello, this is a GET response!"
             self.wfile.write(response.encode("utf-8"))
 
-            print("GET request received")
-
     def do_POST(self):
-        response_data = "POST received"
-        more = None
-        # Обработка POST запроса
+        try:
+            response_data = []
+            more = False
+
+            post_data = self._get_post_data()
+            email = self._extract_email(post_data)
+
+            if email:
+                print("Emails found:", email)
+                gen_data = self._get_data_by_email(email)
+                response_data, more = self._process_generator_data(gen_data)
+
+            self._send_response(200, {"data": response_data, "more": more})
+
+            print(f"POST request processed successfully with data: {post_data}")
+
+        except Exception as e:
+            self._send_response(500, {"error": str(e)})
+            print(f"Error processing POST request: {e}")
+
+    def _get_post_data(self):
+        """Получение данных из POST запроса."""
         content_length = int(self.headers["Content-Length"])
         post_data = self.rfile.read(content_length).decode("utf-8")
+        return json.loads(post_data)
 
-        data = json.loads(post_data)
+    def _extract_email(self, data):
+        """Извлечение email из данных."""
+        emails = find_emails(data.get("email", ""))
+        return emails[0] if emails else None
 
-        if len(emails := find_emails(data["email"])) > 0:
-            print(emails)
-            response_data = list()
-            gen_data = self._get_data_by_email(emails[0])
+    def _process_generator_data(self, gen_data):
+        """Обработка данных из генератора, возвращающего message и log данные."""
+        response_data = []
+        more = False
 
-            for i in list(range(101)):
-                if i >= 100:
-                    more = True
-                    break
-                message_item = next(gen_data)
-                log_item = next(gen_data)
-                if message_item:
-                    human_readable = message_item[0].strftime("%Y-%m-%d %H:%M:%S")
-                    response_data.append([human_readable, *message_item[1:]])
-                    print("message_item:", message_item)
-                if log_item:
-                    human_readable = log_item[0].strftime("%Y-%m-%d %H:%M:%S")
-                    response_data.append([human_readable, *log_item[1:]])
-                    print("log_item:", log_item)
-                if not message_item and not log_item:
-                    break
+        for i in range(100):  # Максимум 100 итераций
+            message_item = next(gen_data, None)
+            log_item = next(gen_data, None)
 
-        self.send_response(200)
+            if message_item:
+                response_data.append(self._format_data(message_item))
+            if log_item:
+                response_data.append(self._format_data(log_item))
+
+            if not message_item and not log_item:
+                break
+        else:
+            more = True
+
+        return response_data, more
+
+    def _format_data(self, item):
+        """Форматирование данных для ответа."""
+        human_readable = item[0].strftime("%Y-%m-%d %H:%M:%S")
+        return [human_readable, *item[1:]]
+
+    def _send_response(self, status_code, response_data):
+        """Отправка HTTP ответа."""
+        self.send_response(status_code)
         self.send_header("Content-type", "application/json")
         self.end_headers()
-
-        response = {"data": response_data, "more": more}
-        self.wfile.write(json.dumps(response).encode("utf-8"))
-
-        # Печать текста в консоль
-        print(f"POST request received with data: {post_data}")
+        self.wfile.write(json.dumps(response_data).encode("utf-8"))
 
     @staticmethod
     def _get_data_by_email(email):
-        conn = (
-            connect_to_db()
-        )  # переиспользуем. Вынести бы в функции с логикой работы с БД в отдельный модуль... TODO
+        """Получение данных message и log из базы данных."""
+        conn = connect_to_db()  # TODO: Вынести в отдельный модуль
         with conn.cursor() as cursor:
             cursor.execute(
-                "SELECT * FROM message WHERE str like %s ORDER BY created ASC",
+                "SELECT * FROM message WHERE str LIKE %s ORDER BY created ASC",
                 ("%" + email + "%",),
             )
             message_data = cursor.fetchall()
@@ -96,7 +114,6 @@ class AsyncHTTPRequestHandler(BaseHTTPRequestHandler):
         for message_item, log_item in itertools.zip_longest(message_data, log_data):
             yield message_item
             yield log_item
-        # return message_data, log_data
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):

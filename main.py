@@ -1,7 +1,7 @@
 import asyncio
 
 from server import AsyncHTTPRequestHandler, ThreadedHTTPServer
-from chain_parser import parse_logs
+from parse.chain_parser import parse_logs
 
 
 async def run_server(loop, server):
@@ -21,6 +21,6 @@ def start_server():
 
 if __name__ == "__main__":
     # Заполнение данных в БД. Часть 1 - парсинг
-    parse_logs()
+    # parse_logs()
     # Часть 2 - сервер с поиском
     start_server()
